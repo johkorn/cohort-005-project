@@ -30,7 +30,7 @@ const refundActionSchema = z.object({
   reason: z
     .string()
     .trim()
-    .min(10, "Tell us a little more about why you want to cancel.")
+    .min(10, "Tell us a little more about why you want a refund.")
     .max(1000, "Please keep your reason under 1000 characters."),
 });
 
@@ -86,25 +86,24 @@ function lastDayOfWindow(purchasedAtIso: string): string {
 }
 
 /**
- * The confirmation the learner gets in their inbox. There is no mail
+ * The confirmation the student gets in their inbox. There is no mail
  * transport wired up yet, so the built message goes to the server log.
  */
-function buildReversalEmail(input: {
-  learnerName: string;
-  learnerEmail: string;
+function buildRefundRequestedEmail(input: {
+  studentName: string;
+  studentEmail: string;
   courseTitle: string;
   amount: number;
 }) {
   return {
-    to: input.learnerEmail,
-    subject: `Reversal requested — ${input.courseTitle}`,
+    to: input.studentEmail,
+    subject: `Refund requested — ${input.courseTitle}`,
     body: [
-      `Hi ${input.learnerName},`,
+      `Hi ${input.studentName},`,
       "",
-      `We have your Reversal request for "${input.courseTitle}".`,
-      `The Reversal is for ${formatPrice(input.amount)}, the amount you paid.`,
+      `We have your refund request for "${input.courseTitle}". If we approve it, we'll send ${formatPrice(input.amount)}, the amount you paid, back to your card, and you'll lose access to the course.`,
       "",
-      "Our team reviews every Reversal by hand. You do not need to do anything else — we will email you again when it is done.",
+      "We review every refund by hand and will email you again once we've decided.",
       "",
       "— The Cadence team",
     ].join("\n"),
@@ -115,7 +114,7 @@ export async function action({ params, request }: Route.ActionArgs) {
   const currentUserId = await getCurrentUserId(request);
 
   if (!currentUserId) {
-    throw data("You must be logged in to cancel a purchase.", { status: 401 });
+    throw data("You must be logged in to request a refund.", { status: 401 });
   }
 
   const { slug } = parseParams(params, refundParamsSchema);
@@ -125,13 +124,13 @@ export async function action({ params, request }: Route.ActionArgs) {
     throw data("Course not found", { status: 404 });
   }
 
-  const learner = db
+  const student = db
     .select()
     .from(users)
     .where(eq(users.id, currentUserId))
     .get();
 
-  if (!learner) {
+  if (!student) {
     throw data("User not found", { status: 404 });
   }
 
@@ -142,13 +141,13 @@ export async function action({ params, request }: Route.ActionArgs) {
   }
 
   if (getOpenRefund(purchase.id)) {
-    throw data("You already have a request open on this purchase.", {
+    throw data("You already have a refund requested for this course.", {
       status: 409,
     });
   }
 
   // A seat that came out of a team licence, and has been claimed, belongs to
-  // the team — the learner cannot hand it back on their own.
+  // the team — the student cannot hand it back on their own.
   const claimedSeat = db
     .select({ id: coupons.id })
     .from(coupons)
@@ -158,7 +157,7 @@ export async function action({ params, request }: Route.ActionArgs) {
     .get();
 
   if (claimedSeat) {
-    throw data("A claimed team seat cannot be cancelled.", { status: 403 });
+    throw data("A claimed team seat can't be refunded.", { status: 403 });
   }
 
   const today = calendarDay(new Date());
@@ -195,7 +194,7 @@ export async function action({ params, request }: Route.ActionArgs) {
   }
 
   if (watchedSeconds >= MAX_WATCHED_HOURS * 60 * 60) {
-    throw data("You have watched too much of this course to cancel it.", {
+    throw data("You have watched too much of this course to get a refund.", {
       status: 403,
     });
   }
@@ -222,9 +221,9 @@ export async function action({ params, request }: Route.ActionArgs) {
     .returning()
     .get();
 
-  const email = buildReversalEmail({
-    learnerName: learner.name,
-    learnerEmail: learner.email,
+  const email = buildRefundRequestedEmail({
+    studentName: student.name,
+    studentEmail: student.email,
     courseTitle: course.title,
     amount: refundableAmount,
   });
